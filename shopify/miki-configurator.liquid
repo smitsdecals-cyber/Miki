@@ -1,0 +1,55 @@
+{% comment %}
+  Snippet Shopify : Miki SVG Configurator
+  -------------------------------------------------------------
+  Intégration : copier ce fichier dans `snippets/` puis l'inclure
+  dans un template produit, par ex. `product.liquid` ou une section :
+
+      {% render 'miki-configurator', endpoint: 'https://votre-domaine.fr' %}
+
+  Variables :
+    - endpoint (string) : URL publique de l'application Java (sans slash final)
+    - height   (string) : hauteur de l'iframe (défaut: 720px)
+{% endcomment %}
+
+{%- assign mc_endpoint = endpoint | default: 'https://votre-domaine.fr' -%}
+{%- assign mc_height = height | default: '720px' -%}
+
+<div id="miki-configurator-wrap" style="width:100%;">
+  <iframe
+    id="miki-configurator-frame"
+    src="{{ mc_endpoint }}/configurator.html"
+    style="width:100%; height:{{ mc_height }}; border:0; border-radius:10px; background:#f7f8fa;"
+    allow="clipboard-write"
+    referrerpolicy="no-referrer-when-downgrade">
+  </iframe>
+
+  <form id="miki-add-form" action="/cart/add" method="post" enctype="multipart/form-data" style="display:none;">
+    <input type="hidden" name="id" value="{{ product.variants.first.id }}">
+    <input type="hidden" name="quantity" value="1">
+    <input type="hidden" name="properties[_svg]" id="miki-svg-prop">
+    <input type="hidden" name="properties[Configuration]" value="Personnalisée">
+  </form>
+</div>
+
+<script>
+(function() {
+  var endpoint = {{ mc_endpoint | json }};
+  var frame = document.getElementById("miki-configurator-frame");
+
+  window.addEventListener("message", function(event) {
+    // Sécurité : n'accepter que des messages issus de l'endpoint connu
+    try {
+      var originUrl = new URL(event.origin);
+      var endpointUrl = new URL(endpoint);
+      if (originUrl.origin !== endpointUrl.origin) return;
+    } catch (e) { return; }
+
+    var data = event.data || {};
+    if (data.type === "miki:add-to-cart") {
+      // Soumet une copie du SVG en propriété de ligne du panier
+      document.getElementById("miki-svg-prop").value = data.svg || "";
+      document.getElementById("miki-add-form").submit();
+    }
+  }, false);
+})();
+</script>

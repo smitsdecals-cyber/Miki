@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" width="600" height="600">
+  <!--
+    Convention de nommage (à reproduire dans Illustrator):
+      - id="color_xxx"  -> zone dont on peut changer la couleur (fill)
+      - id="texte_xxx"  -> zone de texte modifiable (cliquer dessus)
+      - id="logo_xxx"   -> emplacement de logo (cliquer / drag&drop)
+    En sortie Illustrator, le nom du calque devient l'attribut id du <g>.
+  -->
+
+  <g id="color_fond" data-name="color_fond">
+    <rect x="0" y="0" width="600" height="600" fill="#f4f1ea"/>
+  </g>
+
+  <g id="color_tshirt" data-name="color_tshirt">
+    <path fill="#1e88e5" stroke="#0d47a1" stroke-width="3" d="
+      M 180 130
+      L 240 100
+      L 260 130
+      Q 300 160 340 130
+      L 360 100
+      L 420 130
+      L 460 200
+      L 410 240
+      L 410 500
+      L 190 500
+      L 190 240
+      L 140 200
+      Z"/>
+  </g>
+
+  <g id="color_col" data-name="color_col">
+    <path fill="#0d47a1" d="M 260 130 Q 300 160 340 130 L 330 150 Q 300 175 270 150 Z"/>
+  </g>
+
+  <g id="logo_principal" data-name="logo_principal" transform="translate(260 260)">
+    <rect width="80" height="80" fill="#ffffff" stroke="#999" stroke-dasharray="4 4" stroke-width="1"/>
+    <text x="40" y="44" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#999">Logo</text>
+  </g>
+
+  <g id="texte_slogan" data-name="texte_slogan">
+    <text x="300" y="400" text-anchor="middle"
+          font-family="Arial, sans-serif" font-size="28" font-weight="bold" fill="#ffffff">
+      VOTRE TEXTE
+    </text>
+  </g>
+
+  <g id="texte_sous_slogan" data-name="texte_sous_slogan">
+    <text x="300" y="440" text-anchor="middle"
+          font-family="Arial, sans-serif" font-size="16" fill="#ffffff">
+      sous-titre
+    </text>
+  </g>
+</svg>

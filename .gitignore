@@ -1,0 +1,13 @@
+target/
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Runtime DB
+data/
+*.db
+*.db-journal
+
+# Logs
+*.log

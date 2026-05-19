@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — Miki</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Administration</h1>
+    <nav>
+      <a href="configurator.html">Configurateur</a>
+    </nav>
+  </header>
+
+  <div style="padding: 16px;">
+    <div class="tabs">
+      <div class="tab active" data-tab="logos">Logos</div>
+      <div class="tab" data-tab="templates">Templates</div>
+      <div class="tab" data-tab="help">Guide Illustrator</div>
+    </div>
+
+    <!-- ============================ LOGOS ============================ -->
+    <section class="tab-panel active" data-tab-panel="logos">
+      <div class="admin-grid">
+        <div class="panel">
+          <h2>Ajouter un logo</h2>
+          <div class="help">
+            Importez un fichier <strong>.svg</strong> exporté d'Illustrator
+            (idéalement « SVG profile 1.1 » ou « SVG 1.1 (Tiny) »).
+          </div>
+          <form id="logoForm">
+            <div class="field">
+              <label>Nom</label>
+              <input type="text" name="name" required>
+            </div>
+            <div class="field">
+              <label>Catégorie</label>
+              <input type="text" name="category" placeholder="ex. formes, marques, animaux…">
+            </div>
+            <div class="field">
+              <label>Fichier SVG</label>
+              <input type="file" name="file" accept=".svg,image/svg+xml" required>
+            </div>
+            <button type="submit">Ajouter le logo</button>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h2>Bibliothèque</h2>
+          <div class="field"><input id="adminLogoSearch" type="search" placeholder="Rechercher…"></div>
+          <div id="logosAdmin" class="admin-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================== TEMPLATES ========================== -->
+    <section class="tab-panel" data-tab-panel="templates">
+      <div class="admin-grid">
+        <div class="panel">
+          <h2>Ajouter un template</h2>
+          <div class="help">
+            Le SVG doit contenir des groupes <code>&lt;g id="color_…"&gt;</code>,
+            <code>id="texte_…"</code> ou <code>id="logo_…"</code>.
+            Voir l'onglet <strong>Guide Illustrator</strong>.
+          </div>
+          <form id="templateForm">
+            <div class="field"><label>Nom</label><input type="text" name="name" required></div>
+            <div class="field"><label>Description</label><textarea name="description" rows="2"></textarea></div>
+            <div class="field"><label>Fichier SVG</label>
+              <input type="file" name="file" accept=".svg,image/svg+xml" required></div>
+            <button type="submit">Ajouter le template</button>
+          </form>
+        </div>
+        <div class="panel">
+          <h2>Templates existants</h2>
+          <div id="templatesAdmin" class="admin-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ HELP ============================ -->
+    <section class="tab-panel" data-tab-panel="help">
+      <div class="panel" style="max-width: 800px;">
+        <h2>Convention de nommage des calques</h2>
+        <p>Dans Illustrator, ouvrez la palette <em>Calques</em> et renommez chaque
+           calque/groupe selon le type de modification souhaité :</p>
+        <ul>
+          <li><code>color_xxx</code> — zone dont la couleur peut être modifiée</li>
+          <li><code>texte_xxx</code> — texte modifiable (cliquer + saisir)</li>
+          <li><code>logo_xxx</code> — emplacement de logo (drag &amp; drop)</li>
+        </ul>
+        <p>À l'export <em>Fichier → Exporter sous… → SVG</em>, cochez :</p>
+        <ul>
+          <li><strong>Styling :</strong> Presentation Attributes</li>
+          <li><strong>Object IDs :</strong> Layer Names</li>
+          <li><strong>Decimal :</strong> 2</li>
+          <li><strong>Minify / Responsive :</strong> au choix</li>
+        </ul>
+        <p>Le nom du calque devient ainsi l'<code>id</code> du <code>&lt;g&gt;</code>
+           et le configurateur l'expose automatiquement.</p>
+      </div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="js/admin.js"></script>
+</body>
+</html>

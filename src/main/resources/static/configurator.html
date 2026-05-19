@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configurateur SVG — Miki</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="top">
+    <h1>Configurateur SVG</h1>
+    <nav>
+      <a href="admin.html">Admin</a>
+    </nav>
+  </header>
+
+  <div class="app">
+    <!-- Panneau gauche : choix du template + propriétés courantes -->
+    <aside class="panel" id="leftPanel">
+      <h2>Template</h2>
+      <div class="field">
+        <label for="templateSelect">Modèle de base</label>
+        <select id="templateSelect"></select>
+      </div>
+
+      <h2>Couleurs</h2>
+      <div id="colorList"></div>
+
+      <h2>Textes</h2>
+      <div id="textList"></div>
+
+      <div class="toolbar" style="margin-top: 18px;">
+        <button id="resetBtn" class="ghost">Réinitialiser</button>
+        <button id="exportBtn">Exporter SVG</button>
+        <button id="exportPngBtn" class="ghost">Exporter PNG</button>
+      </div>
+      <div class="toolbar">
+        <button id="addToCartBtn" style="width:100%;">Ajouter au panier</button>
+      </div>
+    </aside>
+
+    <!-- Scène centrale : SVG -->
+    <main class="stage" id="stage">
+      <div id="svgHost" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;"></div>
+    </main>
+
+    <!-- Panneau droit : bibliothèque de logos (drag&drop) -->
+    <aside class="panel">
+      <h2>Bibliothèque de logos</h2>
+      <div class="help">
+        Glissez un logo sur une zone <strong>logo_*</strong> du visuel, ou cliquez sur une zone logo puis sur un logo.
+      </div>
+      <div class="field">
+        <input id="logoSearch" type="search" placeholder="Rechercher…">
+      </div>
+      <div class="field">
+        <label for="categoryFilter">Catégorie</label>
+        <select id="categoryFilter"><option value="">Toutes</option></select>
+      </div>
+      <div id="logosGrid" class="logos-grid"></div>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="js/configurator.js"></script>
+</body>
+</html>
