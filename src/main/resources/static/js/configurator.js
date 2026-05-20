@@ -2,17 +2,36 @@
 /**
  * Configurateur SVG Miki
  *
- * Convention de nommage des calques Illustrator (l'export Illustrator
- * place le nom du calque dans l'attribut id du <g>):
- *   color_xxx  -> zone dont on peut modifier la couleur (fill)
- *   texte_xxx  -> zone de texte modifiable
- *   logo_xxx   -> emplacement de logo (clic / drag&drop)
+ * Convention de nommage des calques Illustrator :
+ *   color_xxx  -> zone couleur (fill)
+ *   texte_xxx  -> texte (contenu, police, taille, position, gras, couleur)
+ *   logo_xxx   -> emplacement de logo (clic / drag&drop / drag)
  *
- * Tous les <g> dont l'id (ou data-name) commence par l'un de ces
- * préfixes sont détectés automatiquement et exposés dans l'UI.
+ * Les calques nommés "numero_*" sont traités comme du texte avec des
+ * contrôles étendus (taille, police, position) — c'est le cas typique
+ * d'un numéro de course.
  */
 
 const API = (path) => `/api${path}`;
+
+const FONT_FAMILIES = [
+  { label: "Bebas Neue (racing)",   value: "'Bebas Neue', Impact, sans-serif" },
+  { label: "Oswald",                value: "'Oswald', sans-serif" },
+  { label: "Anton",                 value: "'Anton', Impact, sans-serif" },
+  { label: "Racing Sans One",       value: "'Racing Sans One', sans-serif" },
+  { label: "Russo One",             value: "'Russo One', sans-serif" },
+  { label: "Black Ops One",         value: "'Black Ops One', sans-serif" },
+  { label: "Teko",                  value: "'Teko', sans-serif" },
+  { label: "Audiowide",             value: "'Audiowide', sans-serif" },
+  { label: "Roboto Condensed",      value: "'Roboto Condensed', Arial, sans-serif" },
+  { label: "Impact",                value: "Impact, Charcoal, sans-serif" },
+  { label: "Arial Black",           value: "'Arial Black', Gadget, sans-serif" },
+  { label: "Arial",                 value: "Arial, Helvetica, sans-serif" },
+  { label: "Helvetica",             value: "Helvetica, Arial, sans-serif" },
+  { label: "Times New Roman",       value: "'Times New Roman', Times, serif" },
+  { label: "Georgia",               value: "Georgia, serif" },
+  { label: "Courier New",           value: "'Courier New', Courier, monospace" },
+];
 
 const state = {
   templates: [],
@@ -20,6 +39,7 @@ const state = {
   currentTemplateId: null,
   originalSvg: null,
   selectedEl: null,
+  freeLogoCounter: 0,
 };
 
 // --------------------------------------------------------------------------
@@ -42,12 +62,52 @@ function nameOf(node) {
 }
 
 function isColor(node) { return nameOf(node).toLowerCase().startsWith("color"); }
-function isText(node)  { return nameOf(node).toLowerCase().startsWith("texte") ||
-                                nameOf(node).toLowerCase().startsWith("text"); }
+function isText(node)  {
+  const n = nameOf(node).toLowerCase();
+  return n.startsWith("texte") || n.startsWith("text") || n.startsWith("numero");
+}
 function isLogo(node)  { return nameOf(node).toLowerCase().startsWith("logo"); }
 
 function prettyLabel(rawId) {
-  return rawId.replace(/^(color|texte|text|logo)_?/i, "").replace(/[_-]/g, " ") || rawId;
+  return rawId.replace(/^(color|texte|text|logo|numero)_?/i, "").replace(/[_-]/g, " ") || rawId;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  }[c]));
+}
+
+function cssEscape(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/"/g, '\\"');
+}
+
+// --------------------------------------------------------------------------
+// User-offset helpers (déplacement utilisateur sans détruire le transform AI)
+// --------------------------------------------------------------------------
+
+function getUserOffset(g) {
+  return { x: +(g.dataset.uoX || 0), y: +(g.dataset.uoY || 0) };
+}
+function setUserOffset(g, x, y) {
+  g.dataset.uoX = x; g.dataset.uoY = y;
+  if (g.dataset.baseTransform === undefined) {
+    g.dataset.baseTransform = g.getAttribute("transform") || "";
+  }
+  const base = g.dataset.baseTransform;
+  const tr = `translate(${x} ${y}) ${base}`.trim();
+  g.setAttribute("transform", tr);
+  // Synchronise les inputs X/Y du panneau
+  syncPositionInputs(g);
+}
+
+function syncPositionInputs(g) {
+  const id = nameOf(g);
+  const xInp = document.querySelector(`[data-pos-x-for="${cssEscape(id)}"]`);
+  const yInp = document.querySelector(`[data-pos-y-for="${cssEscape(id)}"]`);
+  const off = getUserOffset(g);
+  if (xInp) xInp.value = off.x;
+  if (yInp) yInp.value = off.y;
 }
 
 // --------------------------------------------------------------------------
@@ -75,6 +135,7 @@ async function loadTemplate(id) {
   const t = await r.json();
   state.currentTemplateId = id;
   state.originalSvg = t.svgContent;
+  state.freeLogoCounter = 0;
   renderSvg(t.svgContent);
   buildControls();
 }
@@ -108,12 +169,6 @@ function renderSvg(svgString) {
   decorateEditableElements(svg);
 }
 
-/**
- * Parcourt les <g> du SVG et ajoute :
- *   - data-editable + data-kind (color / text / logo)
- *   - listeners de sélection
- *   - drop zones pour les logos
- */
 function decorateEditableElements(svg) {
   svg.querySelectorAll("g").forEach(g => {
     if (!nameOf(g)) return;
@@ -129,11 +184,17 @@ function decorateEditableElements(svg) {
     g.addEventListener("click", (e) => {
       e.stopPropagation();
       selectElement(g);
+      // Active automatiquement l'onglet correspondant
+      switchTab(kind === "color" ? "colors" : kind === "text" ? "texts" : "logos");
     });
 
     if (kind === "logo") {
       g.setAttribute("data-drop-target", "true");
       attachDropHandlers(g);
+    }
+    if (kind === "text") {
+      const t = g.querySelector("text");
+      if (t) makeGroupDraggable(g);
     }
   });
 }
@@ -142,8 +203,6 @@ function selectElement(el) {
   $$(".stage [data-editable]").forEach(n => n.classList.remove("selected"));
   el.classList.add("selected");
   state.selectedEl = el;
-
-  // Surligne la ligne correspondante dans le panneau de gauche
   $$("[data-control-for]").forEach(n => n.style.background = "");
   const id = nameOf(el);
   const ctl = document.querySelector(`[data-control-for="${cssEscape(id)}"]`);
@@ -151,25 +210,51 @@ function selectElement(el) {
 }
 
 // --------------------------------------------------------------------------
-// Construction des contrôles à partir du SVG courant
+// Construction des contrôles
 // --------------------------------------------------------------------------
 
 function buildControls() {
   const svg = $("#svgHost").querySelector("svg");
   if (!svg) return;
-  const colorList = $("#colorList");
-  const textList = $("#textList");
-  colorList.innerHTML = "";
-  textList.innerHTML = "";
-
-  svg.querySelectorAll("g[data-editable]").forEach(g => {
-    const kind = g.getAttribute("data-kind");
-    const id = nameOf(g);
-    const label = prettyLabel(id);
-    if (kind === "color") colorList.appendChild(buildColorControl(g, id, label));
-    else if (kind === "text") textList.appendChild(buildTextControl(g, id, label));
-  });
+  buildColorControls(svg);
+  buildTextControls(svg);
+  buildLogoControls(svg);
 }
+
+function buildColorControls(svg) {
+  const list = $("#colorList");
+  list.innerHTML = "";
+  svg.querySelectorAll('g[data-kind="color"]').forEach(g => {
+    list.appendChild(buildColorControl(g, nameOf(g), prettyLabel(nameOf(g))));
+  });
+  if (!list.children.length) {
+    list.innerHTML = `<p class="muted-note">Aucun calque "color_…" dans ce template.</p>`;
+  }
+}
+
+function buildTextControls(svg) {
+  const list = $("#textList");
+  list.innerHTML = "";
+  svg.querySelectorAll('g[data-kind="text"]').forEach(g => {
+    list.appendChild(buildTextControl(g, nameOf(g), prettyLabel(nameOf(g))));
+  });
+  if (!list.children.length) {
+    list.innerHTML = `<p class="muted-note">Aucun calque "texte_…" ou "numero_…" dans ce template.</p>`;
+  }
+}
+
+function buildLogoControls(svg) {
+  const list = $("#logoZonesList");
+  list.innerHTML = "";
+  const zones = svg.querySelectorAll('g[data-kind="logo"]');
+  zones.forEach(g => list.appendChild(buildLogoZoneControl(g)));
+  if (!zones.length) {
+    list.innerHTML = `<p class="muted-note">Aucun emplacement "logo_…" dans ce template.
+      Utilisez « + Ajouter un logo libre » pour en créer un.</p>`;
+  }
+}
+
+// ---- Color control ----
 
 function buildColorControl(g, id, label) {
   const current = getCurrentFill(g) || "#000000";
@@ -185,8 +270,7 @@ function buildColorControl(g, id, label) {
   const [picker, hex] = wrap.querySelectorAll("input");
   const apply = (c) => {
     applyFillToGroup(g, c);
-    hex.value = c;
-    picker.value = normalizeColor(c);
+    hex.value = c; picker.value = normalizeColor(c);
   };
   picker.addEventListener("input", (e) => apply(e.target.value));
   hex.addEventListener("change", (e) => apply(e.target.value));
@@ -194,37 +278,116 @@ function buildColorControl(g, id, label) {
   return wrap;
 }
 
+// ---- Text control (with font, size, weight, position) ----
+
 function buildTextControl(g, id, label) {
   const textNode = g.querySelector("text");
   const current = textNode ? textNode.textContent.trim() : "";
   const fill = textNode ? (textNode.getAttribute("fill") || "#000000") : "#000000";
+  const size = textNode ? +(textNode.getAttribute("font-size") || 24) : 24;
+  const family = textNode ? (textNode.getAttribute("font-family") || "") : "";
+  const weight = textNode ? (textNode.getAttribute("font-weight") || "normal") : "normal";
+  const off = getUserOffset(g);
 
   const wrap = document.createElement("div");
-  wrap.className = "field";
+  wrap.className = "field text-block";
   wrap.setAttribute("data-control-for", id);
   wrap.innerHTML = `
-    <label>${escapeHtml(label)}</label>
-    <input type="text" value="${escapeHtml(current)}" placeholder="Saisir le texte…">
+    <label class="block-title">${escapeHtml(label)}</label>
+    <input type="text" class="text-content" value="${escapeHtml(current)}" placeholder="Saisir le texte…">
+
     <div class="row" style="margin-top:6px;">
-      <input type="color" value="${normalizeColor(fill)}" title="Couleur du texte">
-      <input type="number" min="6" max="200" value="${textNode ? +(textNode.getAttribute('font-size')||24) : 24}"
-             style="width:80px;" title="Taille">
-    </div>`;
-  const [textInput, colorInput, sizeInput] = wrap.querySelectorAll("input");
-  textInput.addEventListener("input", () => {
-    if (textNode) textNode.textContent = textInput.value;
-  });
-  colorInput.addEventListener("input", () => {
-    if (textNode) textNode.setAttribute("fill", colorInput.value);
-  });
-  sizeInput.addEventListener("input", () => {
-    if (textNode) textNode.setAttribute("font-size", sizeInput.value);
+      <select class="font-family" style="flex:1;">
+        ${FONT_FAMILIES.map(f =>
+          `<option value="${escapeHtml(f.value)}" ${family === f.value ? "selected" : ""}>${escapeHtml(f.label)}</option>`
+        ).join("")}
+      </select>
+    </div>
+
+    <div class="row" style="margin-top:6px;">
+      <input type="color" class="text-color" value="${normalizeColor(fill)}" title="Couleur">
+      <input type="number" class="text-size" min="6" max="400" value="${size}" style="width:80px;" title="Taille">
+      <button type="button" class="ghost small text-bold ${weight === 'bold' || +weight >= 600 ? 'active' : ''}"
+              title="Gras">B</button>
+    </div>
+
+    <div class="row" style="margin-top:6px;">
+      <label class="mini">X</label>
+      <input type="number" class="pos-x" value="${off.x}" data-pos-x-for="${escapeHtml(id)}" style="width:70px;">
+      <label class="mini">Y</label>
+      <input type="number" class="pos-y" value="${off.y}" data-pos-y-for="${escapeHtml(id)}" style="width:70px;">
+      <button type="button" class="ghost small reset-pos" title="Recentrer">↺</button>
+    </div>
+    <p class="muted-note" style="margin:6px 0 0;">Astuce : on peut aussi déplacer le texte au clic-glissé sur le visuel.</p>
+  `;
+
+  const textInput  = wrap.querySelector(".text-content");
+  const fontSelect = wrap.querySelector(".font-family");
+  const colorInput = wrap.querySelector(".text-color");
+  const sizeInput  = wrap.querySelector(".text-size");
+  const boldBtn    = wrap.querySelector(".text-bold");
+  const posX       = wrap.querySelector(".pos-x");
+  const posY       = wrap.querySelector(".pos-y");
+  const resetPos   = wrap.querySelector(".reset-pos");
+
+  if (textNode) {
+    textInput.addEventListener("input", () => textNode.textContent = textInput.value);
+    fontSelect.addEventListener("change", () => textNode.setAttribute("font-family", fontSelect.value));
+    colorInput.addEventListener("input", () => textNode.setAttribute("fill", colorInput.value));
+    sizeInput.addEventListener("input", () => textNode.setAttribute("font-size", sizeInput.value));
+    boldBtn.addEventListener("click", () => {
+      const isBold = boldBtn.classList.toggle("active");
+      textNode.setAttribute("font-weight", isBold ? "bold" : "normal");
+    });
+  }
+  posX.addEventListener("input", () => setUserOffset(g, +posX.value || 0, getUserOffset(g).y));
+  posY.addEventListener("input", () => setUserOffset(g, getUserOffset(g).x, +posY.value || 0));
+  resetPos.addEventListener("click", () => setUserOffset(g, 0, 0));
+
+  wrap.addEventListener("click", () => selectElement(g));
+  return wrap;
+}
+
+// ---- Logo zone control (one row per zone) ----
+
+function buildLogoZoneControl(g) {
+  const id = nameOf(g);
+  const label = prettyLabel(id);
+  const placed = g.querySelector("[data-logo-id]");
+
+  const wrap = document.createElement("div");
+  wrap.className = "logo-zone-row";
+  wrap.setAttribute("data-control-for", id);
+
+  const previewSvg = placed ? new XMLSerializer().serializeToString(placed) : "";
+  wrap.innerHTML = `
+    <div class="zone-preview">${placed ? previewSvg :
+      `<span class="empty">vide</span>`}</div>
+    <div class="zone-meta">
+      <div class="zone-name">${escapeHtml(label)}</div>
+      <div class="zone-state">${placed ? "Logo posé" : "Emplacement vide"}</div>
+    </div>
+    <div class="zone-actions">
+      <button class="ghost small zone-select" title="Sélectionner">◎</button>
+      ${placed ? `<button class="danger small zone-remove" title="Retirer le logo">✕</button>` : ""}
+      ${id.startsWith("logo_user_") ? `<button class="danger small zone-delete" title="Supprimer cet emplacement">🗑</button>` : ""}
+    </div>
+  `;
+
+  wrap.querySelector(".zone-select").addEventListener("click", () => selectElement(g));
+  const removeBtn = wrap.querySelector(".zone-remove");
+  if (removeBtn) removeBtn.addEventListener("click", () => { removePlacedLogo(g); rebuildLogoControls(); });
+  const deleteBtn = wrap.querySelector(".zone-delete");
+  if (deleteBtn) deleteBtn.addEventListener("click", () => {
+    if (confirm("Supprimer cet emplacement libre ?")) { g.remove(); rebuildLogoControls(); }
   });
   wrap.addEventListener("click", () => selectElement(g));
-
-  // Permettre le drag du groupe texte
-  if (textNode) makeDraggable(g, textNode);
   return wrap;
+}
+
+function rebuildLogoControls() {
+  const svg = $("#svgHost").querySelector("svg");
+  if (svg) buildLogoControls(svg);
 }
 
 // --------------------------------------------------------------------------
@@ -232,7 +395,6 @@ function buildTextControl(g, id, label) {
 // --------------------------------------------------------------------------
 
 function getCurrentFill(g) {
-  // On prend le fill du premier élément peint trouvé
   const candidate = g.querySelector("[fill]") || g.querySelector("path,rect,circle,polygon,ellipse,polyline");
   if (!candidate) return null;
   return candidate.getAttribute("fill") || "#000000";
@@ -251,7 +413,6 @@ function normalizeColor(c) {
   if (/^#[0-9a-fA-F]{3}$/.test(c)) {
     return "#" + c.slice(1).split("").map(ch => ch + ch).join("");
   }
-  // best-effort fallback
   const ctx = document.createElement("canvas").getContext("2d");
   ctx.fillStyle = "#000";
   ctx.fillStyle = c;
@@ -259,7 +420,7 @@ function normalizeColor(c) {
 }
 
 // --------------------------------------------------------------------------
-// Logos : bibliothèque, click, drag & drop
+// Logos : bibliothèque
 // --------------------------------------------------------------------------
 
 function renderLogosGrid() {
@@ -284,12 +445,11 @@ function renderLogosGrid() {
       e.dataTransfer.effectAllowed = "copy";
     });
     tile.addEventListener("click", () => {
-      // Si une zone logo est sélectionnée, on l'y place
       if (state.selectedEl && state.selectedEl.getAttribute("data-kind") === "logo") {
         const logo = state.logos.find(l => l.id == tile.dataset.logoId);
-        if (logo) placeLogoInto(state.selectedEl, logo);
+        if (logo) { placeLogoInto(state.selectedEl, logo); rebuildLogoControls(); }
       } else {
-        showToast("Cliquez d'abord sur un emplacement « logo_… » du visuel");
+        showToast("Cliquez d'abord sur un emplacement « logo_… »");
       }
     });
   });
@@ -308,84 +468,158 @@ function attachDropHandlers(slot) {
     slot.classList.remove("drag-over");
     const id = e.dataTransfer.getData("application/x-miki-logo");
     const logo = state.logos.find(l => l.id == id);
-    if (logo) placeLogoInto(slot, logo);
+    if (logo) { placeLogoInto(slot, logo); rebuildLogoControls(); }
   });
 }
 
-/**
- * Remplace le contenu d'une zone "logo_*" par le logo choisi, en
- * conservant la position/taille de la boîte d'origine.
- */
 function placeLogoInto(slot, logo) {
-  // Mesurer la boîte d'origine AVANT de toucher au DOM
   const bbox = slot.getBBox();
-
-  // Parser le SVG du logo pour récupérer ses éléments enfants
   const parser = new DOMParser();
   const doc = parser.parseFromString(logo.svgContent, "image/svg+xml");
   const inner = doc.documentElement;
   if (!inner || inner.tagName.toLowerCase() !== "svg") {
-    showToast("Logo invalide");
-    return;
+    showToast("Logo invalide"); return;
   }
-
-  // viewBox du logo source pour calculer l'échelle
   const vb = (inner.getAttribute("viewBox") || "").split(/[\s,]+/).map(Number);
   let srcW = vb[2] || parseFloat(inner.getAttribute("width")) || 100;
   let srcH = vb[3] || parseFloat(inner.getAttribute("height")) || 100;
-
   const scale = Math.min(bbox.width / srcW, bbox.height / srcH);
   const tx = bbox.x + (bbox.width  - srcW * scale) / 2;
   const ty = bbox.y + (bbox.height - srcH * scale) / 2;
 
-  // Vide la zone et y insère un nouveau <g> contenant le logo
   while (slot.firstChild) slot.removeChild(slot.firstChild);
-  slot.removeAttribute("transform"); // on recompose le transform via l'enfant
+  // Le user-offset du slot doit être conservé : on ne touche pas à son transform.
   const inner_g = document.createElementNS("http://www.w3.org/2000/svg", "g");
   inner_g.setAttribute("transform", `translate(${tx} ${ty}) scale(${scale})`);
   inner_g.setAttribute("data-logo-id", logo.id);
-
-  // Copier les enfants du SVG source
   Array.from(inner.childNodes).forEach(n => {
     if (n.nodeType === 1) inner_g.appendChild(document.importNode(n, true));
   });
   slot.appendChild(inner_g);
-
-  // Le drag du logo dans le SVG une fois posé
   makeDraggable(slot, inner_g);
-
-  // Bouton "supprimer le logo" via clic + touche Suppr
   selectElement(slot);
   showToast(`Logo « ${logo.name} » placé`);
 }
 
+function removePlacedLogo(slot) {
+  const placed = slot.querySelectorAll("[data-logo-id]");
+  placed.forEach(p => p.remove());
+  // Repose un placeholder visuel si le slot est maintenant vide
+  if (!slot.firstChild) {
+    const bbox = slot.dataset.placeholderBox ?
+      JSON.parse(slot.dataset.placeholderBox) :
+      { x: 0, y: 0, width: 80, height: 80 };
+    const ph = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    ph.setAttribute("x", bbox.x); ph.setAttribute("y", bbox.y);
+    ph.setAttribute("width", bbox.width || 80); ph.setAttribute("height", bbox.height || 80);
+    ph.setAttribute("fill", "#ffffff");
+    ph.setAttribute("stroke", "#999"); ph.setAttribute("stroke-dasharray", "4 4");
+    ph.setAttribute("data-placeholder", "true");
+    slot.appendChild(ph);
+  }
+  showToast("Logo retiré");
+}
+
 // --------------------------------------------------------------------------
-// Drag à l'intérieur du SVG (déplacement de texte ou de logo posé)
+// Logo libre (zone créée à la volée)
 // --------------------------------------------------------------------------
 
+function addFreeLogo() {
+  const svg = $("#svgHost").querySelector("svg");
+  if (!svg) { showToast("Chargez d'abord un template"); return; }
+  const vb = (svg.getAttribute("viewBox") || "0 0 600 600").split(/[\s,]+/).map(Number);
+  const cx = (vb[2] || 600) / 2, cy = (vb[3] || 600) / 2;
+  const W = 100, H = 100;
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const g = document.createElementNS(SVG_NS, "g");
+  state.freeLogoCounter++;
+  const id = `logo_user_${state.freeLogoCounter}`;
+  g.setAttribute("id", id);
+  g.setAttribute("data-name", id);
+
+  const ph = document.createElementNS(SVG_NS, "rect");
+  ph.setAttribute("x", cx - W / 2); ph.setAttribute("y", cy - H / 2);
+  ph.setAttribute("width", W); ph.setAttribute("height", H);
+  ph.setAttribute("fill", "#ffffff");
+  ph.setAttribute("stroke", "#3498db");
+  ph.setAttribute("stroke-dasharray", "5 5");
+  ph.setAttribute("data-placeholder", "true");
+  g.appendChild(ph);
+
+  // Mémoriser la boîte initiale pour les futurs « retirer logo »
+  g.dataset.placeholderBox = JSON.stringify({ x: cx - W/2, y: cy - H/2, width: W, height: H });
+
+  svg.appendChild(g);
+  // Décoration (data-kind=logo + handlers + drag)
+  g.setAttribute("data-editable", "logo");
+  g.setAttribute("data-kind", "logo");
+  g.setAttribute("data-drop-target", "true");
+  attachDropHandlers(g);
+  g.addEventListener("click", (e) => { e.stopPropagation(); selectElement(g); });
+  makeGroupDraggable(g);
+
+  selectElement(g);
+  switchTab("logos");
+  rebuildLogoControls();
+  showToast("Emplacement libre créé — glissez un logo dessus");
+}
+
+// --------------------------------------------------------------------------
+// Drag intra-SVG
+// --------------------------------------------------------------------------
+
+/** Rend le groupe entier déplaçable (utilise setUserOffset, préserve le transform AI). */
+function makeGroupDraggable(g) {
+  let dragging = false, startX = 0, startY = 0, baseX = 0, baseY = 0;
+  const svg = () => $("#svgHost").querySelector("svg");
+
+  function pt(evt) {
+    const s = svg(); const p = s.createSVGPoint();
+    p.x = evt.clientX; p.y = evt.clientY;
+    return p.matrixTransform(s.getScreenCTM().inverse());
+  }
+
+  g.addEventListener("mousedown", (e) => {
+    // Ne pas démarrer un drag depuis un sous-élément déjà draggable (logo placé)
+    if (e.target.closest("[data-logo-id]")) return;
+    e.stopPropagation();
+    dragging = true;
+    const p = pt(e); startX = p.x; startY = p.y;
+    const off = getUserOffset(g);
+    baseX = off.x; baseY = off.y;
+    g.style.opacity = .85;
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const p = pt(e);
+    setUserOffset(g, baseX + (p.x - startX), baseY + (p.y - startY));
+  });
+  document.addEventListener("mouseup", () => {
+    if (dragging) { dragging = false; g.style.opacity = 1; }
+  });
+}
+
+/** Déplace un sous-élément (ex. le logo posé à l'intérieur d'un slot). */
 function makeDraggable(slot, movable) {
   let dragging = false, startX = 0, startY = 0, baseX = 0, baseY = 0;
   movable.style.cursor = "move";
-
   const svg = $("#svgHost").querySelector("svg");
 
-  function getMouseSvgPoint(evt) {
-    const pt = svg.createSVGPoint();
-    pt.x = evt.clientX; pt.y = evt.clientY;
-    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  function pt(evt) {
+    const p = svg.createSVGPoint();
+    p.x = evt.clientX; p.y = evt.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
   }
-
-  function parseTranslate(node) {
+  function parseTr(node) {
     const t = node.getAttribute("transform") || "";
     const m = t.match(/translate\(\s*(-?[\d.]+)[\s,]+(-?[\d.]+)/);
-    return m ? { x: +m[1], y: +m[2], rest: t.replace(m[0] + ")", "").trim() } :
-               { x: 0, y: 0, rest: t };
+    return { x: m ? +m[1] : 0, y: m ? +m[2] : 0 };
   }
-  function setTranslate(node, x, y) {
+  function setTr(node, x, y) {
     const cur = node.getAttribute("transform") || "";
     if (cur.includes("translate")) {
-      node.setAttribute("transform",
-        cur.replace(/translate\([^)]*\)/, `translate(${x} ${y})`));
+      node.setAttribute("transform", cur.replace(/translate\([^)]*\)/, `translate(${x} ${y})`));
     } else {
       node.setAttribute("transform", `translate(${x} ${y}) ${cur}`.trim());
     }
@@ -394,16 +628,14 @@ function makeDraggable(slot, movable) {
   movable.addEventListener("mousedown", (e) => {
     e.stopPropagation();
     dragging = true;
-    const p = getMouseSvgPoint(e);
-    startX = p.x; startY = p.y;
-    const tr = parseTranslate(movable);
-    baseX = tr.x; baseY = tr.y;
+    const p = pt(e); startX = p.x; startY = p.y;
+    const tr = parseTr(movable); baseX = tr.x; baseY = tr.y;
     movable.style.opacity = .85;
   });
   document.addEventListener("mousemove", (e) => {
     if (!dragging) return;
-    const p = getMouseSvgPoint(e);
-    setTranslate(movable, baseX + (p.x - startX), baseY + (p.y - startY));
+    const p = pt(e);
+    setTr(movable, baseX + (p.x - startX), baseY + (p.y - startY));
   });
   document.addEventListener("mouseup", () => {
     if (dragging) { dragging = false; movable.style.opacity = 1; }
@@ -411,22 +643,25 @@ function makeDraggable(slot, movable) {
 }
 
 // --------------------------------------------------------------------------
-// Touches : Suppr efface le logo de la zone sélectionnée
+// Tabs
+// --------------------------------------------------------------------------
+
+function switchTab(name) {
+  $$("#leftTabs .tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  $$(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.tabPanel === name));
+}
+
+// --------------------------------------------------------------------------
+// Keyboard
 // --------------------------------------------------------------------------
 
 document.addEventListener("keydown", (e) => {
   if ((e.key === "Delete" || e.key === "Backspace") && state.selectedEl &&
       state.selectedEl.getAttribute("data-kind") === "logo") {
-    // Repose un placeholder vide
-    while (state.selectedEl.firstChild) state.selectedEl.removeChild(state.selectedEl.firstChild);
-    const ph = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    const bbox = state.selectedEl.getBBox?.() || { x: 0, y: 0, width: 80, height: 80 };
-    ph.setAttribute("x", bbox.x); ph.setAttribute("y", bbox.y);
-    ph.setAttribute("width", bbox.width || 80); ph.setAttribute("height", bbox.height || 80);
-    ph.setAttribute("fill", "#ffffff");
-    ph.setAttribute("stroke", "#999"); ph.setAttribute("stroke-dasharray", "4 4");
-    state.selectedEl.appendChild(ph);
-    showToast("Logo retiré");
+    // Ne pas intercepter quand l'utilisateur tape dans un input
+    if (["INPUT","TEXTAREA","SELECT"].includes(document.activeElement?.tagName)) return;
+    removePlacedLogo(state.selectedEl);
+    rebuildLogoControls();
   }
 });
 
@@ -438,13 +673,13 @@ function currentSvgString() {
   const svg = $("#svgHost").querySelector("svg");
   if (!svg) return "";
   const clone = svg.cloneNode(true);
-  // retire les attributs d'édition
   clone.querySelectorAll("[data-editable]").forEach(n => {
     n.removeAttribute("data-editable");
     n.removeAttribute("data-kind");
     n.removeAttribute("data-drop-target");
     n.classList.remove("selected");
   });
+  clone.querySelectorAll("[data-placeholder]").forEach(n => n.remove());
   return new XMLSerializer().serializeToString(clone);
 }
 
@@ -478,11 +713,6 @@ async function exportPng() {
   img.src = url;
 }
 
-/**
- * Hook Shopify : envoie la config au store parent. Côté Shopify, écouter
- * `window.addEventListener('message', ...)` sur la page produit pour
- * récupérer le SVG/PNG et l'attacher comme propriété de ligne du panier.
- */
 function addToCart() {
   const svgStr = currentSvgString();
   if (window.parent && window.parent !== window) {
@@ -499,20 +729,6 @@ function addToCart() {
 }
 
 // --------------------------------------------------------------------------
-// Utils
-// --------------------------------------------------------------------------
-
-function escapeHtml(s) {
-  return String(s ?? "").replace(/[&<>"']/g, c => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
-  }[c]));
-}
-
-function cssEscape(s) {
-  return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/"/g, '\\"');
-}
-
-// --------------------------------------------------------------------------
 // Wiring
 // --------------------------------------------------------------------------
 
@@ -525,10 +741,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     downloadBlob(currentSvgString(), "configuration.svg", "image/svg+xml"));
   $("#exportPngBtn").addEventListener("click", exportPng);
   $("#addToCartBtn").addEventListener("click", addToCart);
+  $("#addFreeLogoBtn").addEventListener("click", addFreeLogo);
   $("#logoSearch").addEventListener("input", renderLogosGrid);
   $("#categoryFilter").addEventListener("change", renderLogosGrid);
 
-  // Clic dans la scène hors d'une zone : désélectionner
+  // Onglets
+  $$("#leftTabs .tab").forEach(t => t.addEventListener("click", () => switchTab(t.dataset.tab)));
+
   $("#stage").addEventListener("click", (e) => {
     if (!e.target.closest("[data-editable]")) {
       $$(".stage [data-editable]").forEach(n => n.classList.remove("selected"));

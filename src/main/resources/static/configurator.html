@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Configurateur SVG — Miki</title>
   <link rel="stylesheet" href="css/styles.css">
+  <!-- Polices Google Fonts (racing + classiques) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Oswald:wght@400;700&family=Anton&family=Racing+Sans+One&family=Russo+One&family=Black+Ops+One&family=Roboto+Condensed:wght@400;700&family=Teko:wght@400;700&family=Audiowide&display=swap" rel="stylesheet">
 </head>
 <body>
   <header class="top">
@@ -15,7 +19,7 @@
   </header>
 
   <div class="app">
-    <!-- Panneau gauche : choix du template + propriétés courantes -->
+    <!-- Panneau gauche : template + onglets Couleurs / Textes / Logos -->
     <aside class="panel" id="leftPanel">
       <h2>Template</h2>
       <div class="field">
@@ -23,11 +27,31 @@
         <select id="templateSelect"></select>
       </div>
 
-      <h2>Couleurs</h2>
-      <div id="colorList"></div>
+      <div class="tabs" id="leftTabs">
+        <div class="tab active" data-tab="colors">Couleurs</div>
+        <div class="tab" data-tab="texts">Textes</div>
+        <div class="tab" data-tab="logos">Logos</div>
+      </div>
 
-      <h2>Textes</h2>
-      <div id="textList"></div>
+      <section class="tab-panel active" data-tab-panel="colors">
+        <div id="colorList"></div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="texts">
+        <div id="textList"></div>
+      </section>
+
+      <section class="tab-panel" data-tab-panel="logos">
+        <div class="help">
+          Chaque emplacement <strong>logo_*</strong> du template apparaît
+          ci-dessous. Glissez un logo depuis la bibliothèque à droite, ou
+          ajoutez un logo libre n'importe où sur le visuel.
+        </div>
+        <div id="logoZonesList"></div>
+        <button id="addFreeLogoBtn" class="ghost" style="width:100%; margin-top:8px;">
+          + Ajouter un logo libre
+        </button>
+      </section>
 
       <div class="toolbar" style="margin-top: 18px;">
         <button id="resetBtn" class="ghost">Réinitialiser</button>
@@ -44,11 +68,12 @@
       <div id="svgHost" style="width:100%; height:100%; display:flex; align-items:center; justify-content:center;"></div>
     </main>
 
-    <!-- Panneau droit : bibliothèque de logos (drag&drop) -->
+    <!-- Panneau droit : bibliothèque de logos -->
     <aside class="panel">
       <h2>Bibliothèque de logos</h2>
       <div class="help">
-        Glissez un logo sur une zone <strong>logo_*</strong> du visuel, ou cliquez sur une zone logo puis sur un logo.
+        Glissez un logo sur une zone <strong>logo_*</strong>, ou
+        sélectionnez une zone (onglet « Logos ») puis cliquez un logo.
       </div>
       <div class="field">
         <input id="logoSearch" type="search" placeholder="Rechercher…">

@@ -230,3 +230,60 @@ button.small { padding: 4px 8px; font-size: 12px; }
   z-index: 100;
 }
 .toast.show { opacity: 1; }
+
+/* ---------- Text block & logo zones (left panel) ---------- */
+
+.muted-note { color: var(--muted); font-size: 12px; margin: 8px 0; }
+
+.text-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  background: #fff;
+}
+.text-block .block-title {
+  font-weight: 600; font-size: 13px; color: var(--text);
+  display:block; margin-bottom: 6px;
+}
+.text-block input[type="text"],
+.text-block select { width: 100%; }
+.text-block .row { gap: 6px; }
+.text-block .mini { font-size: 11px; color: var(--muted); }
+
+button.text-bold {
+  font-weight: 700;
+  width: 32px;
+}
+button.text-bold.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.logo-zone-row {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+.logo-zone-row .zone-preview {
+  width: 48px; height: 48px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: #fafafa;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; overflow: hidden;
+}
+.logo-zone-row .zone-preview svg { width: 90%; height: 90%; }
+.logo-zone-row .zone-preview .empty { font-size: 10px; color: var(--muted); }
+.logo-zone-row .zone-meta { flex: 1; min-width: 0; }
+.logo-zone-row .zone-name { font-weight: 600; font-size: 13px; }
+.logo-zone-row .zone-state { font-size: 11px; color: var(--muted); }
+.logo-zone-row .zone-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* tabs réutilisables dans le panneau gauche */
+#leftTabs { margin: 12px 0; }
+#leftTabs .tab { padding: 8px 10px; font-size: 13px; }
