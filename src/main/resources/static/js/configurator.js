@@ -1,15 +1,17 @@
 /* eslint-disable */
 /**
- * Configurateur SVG Miki
+ * Configurateur SVG Miki — adapté kits déco moto
  *
- * Convention de nommage des calques Illustrator :
- *   color_xxx  -> zone couleur (fill)
- *   texte_xxx  -> texte (contenu, police, taille, position, gras, couleur)
- *   logo_xxx   -> emplacement de logo (clic / drag&drop / drag)
+ * Détection (insensible à la casse) sur n'importe quelle balise SVG :
+ *   color_*  / "color"    -> zone modifiable en couleur (regroupée par teinte)
+ *   texte_*  / "TEXT"     -> texte modifiable (police, taille, position, gras)
+ *   numero_* / "NUMBER"   -> idem texte (numéro de course)
+ *   logo_*   / "LOGO"     -> emplacement de logo (clic / drag&drop)
  *
- * Les calques nommés "numero_*" sont traités comme du texte avec des
- * contrôles étendus (taille, police, position) — c'est le cas typique
- * d'un numéro de course.
+ * - Les éléments « color » sans suffixe (id="color", "color-2"…) sont
+ *   automatiquement REGROUPÉS PAR TEINTE : tous les rouges = 1 réglage,
+ *   tous les oranges = 1 autre, etc.
+ * - Les logos déjà dessinés sont préservés et peuvent être restaurés.
  */
 
 const API = (path) => `/api${path}`;
@@ -64,12 +66,14 @@ function nameOf(node) {
 function isColor(node) { return nameOf(node).toLowerCase().startsWith("color"); }
 function isText(node)  {
   const n = nameOf(node).toLowerCase();
-  return n.startsWith("texte") || n.startsWith("text") || n.startsWith("numero");
+  return n.startsWith("text") || n.startsWith("texte") ||
+         n.startsWith("numero") || n.startsWith("number") || n.startsWith("name");
 }
 function isLogo(node)  { return nameOf(node).toLowerCase().startsWith("logo"); }
 
 function prettyLabel(rawId) {
-  return rawId.replace(/^(color|texte|text|logo|numero)_?/i, "").replace(/[_-]/g, " ") || rawId;
+  return rawId.replace(/^(color|texte|text|logo|numero|number|name)[_\-]?/i, "")
+              .replace(/[_\-]/g, " ").trim() || rawId;
 }
 
 function escapeHtml(s) {
@@ -83,7 +87,99 @@ function cssEscape(s) {
 }
 
 // --------------------------------------------------------------------------
-// User-offset helpers (déplacement utilisateur sans détruire le transform AI)
+// Fill helpers (attribut OU style inline)
+// --------------------------------------------------------------------------
+
+function extractFillFromStyle(el) {
+  const style = el.getAttribute("style") || "";
+  const m = style.match(/(?:^|;)\s*fill\s*:\s*([^;]+)/i);
+  return m ? m[1].trim() : null;
+}
+
+function getEffectiveFill(el) {
+  let f = el.getAttribute("fill");
+  if (f && f.toLowerCase() !== "none") return f.trim();
+  f = extractFillFromStyle(el);
+  if (f && f.toLowerCase() !== "none") return f.trim();
+  if (el.tagName && el.tagName.toLowerCase() === "g") {
+    const child = el.querySelector("path,rect,circle,polygon,ellipse,polyline,line,text");
+    if (child) {
+      const cf = getEffectiveFill(child);
+      if (cf) return cf;
+    }
+  }
+  return "#000000";
+}
+
+function updateInlineFill(el, color) {
+  const style = el.getAttribute("style");
+  if (style && /fill\s*:/i.test(style)) {
+    const newStyle = style.replace(/(^|;)\s*fill\s*:\s*[^;]+/i, `$1fill: ${color}`);
+    el.setAttribute("style", newStyle);
+  }
+}
+
+function applyFillToElement(el, color) {
+  const tag = el.tagName ? el.tagName.toLowerCase() : "";
+  if (tag === "g") {
+    el.setAttribute("fill", color);
+    el.querySelectorAll("path,rect,circle,polygon,ellipse,polyline,line,text").forEach(node => {
+      // Ne touche pas aux remplissages par gradient (url(#xxx))
+      const cur = node.getAttribute("fill") || extractFillFromStyle(node) || "";
+      if (cur.startsWith("url(") || cur === "none") return;
+      node.setAttribute("fill", color);
+      updateInlineFill(node, color);
+    });
+  } else {
+    const cur = el.getAttribute("fill") || extractFillFromStyle(el) || "";
+    if (!cur.startsWith("url(") && cur !== "none") {
+      el.setAttribute("fill", color);
+      updateInlineFill(el, color);
+    }
+  }
+}
+
+function normalizeColor(c) {
+  if (!c) return "#000000";
+  c = c.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(c)) return c.toLowerCase();
+  if (/^#[0-9a-fA-F]{3}$/.test(c)) {
+    return "#" + c.slice(1).split("").map(ch => ch + ch).join("").toLowerCase();
+  }
+  if (c.startsWith("url(")) return "#cccccc";
+  const ctx = document.createElement("canvas").getContext("2d");
+  ctx.fillStyle = "#000";
+  try { ctx.fillStyle = c; } catch (e) {}
+  return ctx.fillStyle;
+}
+
+function colorBaseName(hex) {
+  const c = normalizeColor(hex);
+  // Très simple mapping vers des noms FR pour l'UI
+  const named = [
+    ["#000000", "Noir"], ["#ffffff", "Blanc"],
+    ["#e30613", "Rouge"], ["#eb611c", "Orange"], ["#f1c40f", "Jaune"],
+    ["#3498db", "Bleu"], ["#1e88e5", "Bleu"], ["#0d47a1", "Bleu marine"],
+    ["#16a34a", "Vert"], ["#70706f", "Gris"], ["#c7c7c6", "Gris clair"],
+    ["#999999", "Gris"], ["#cccccc", "Gris"], ["#e74c3c", "Rouge"],
+  ];
+  // Distance euclidienne RGB pour trouver la couleur la plus proche
+  const r = parseInt(c.slice(1, 3), 16);
+  const g = parseInt(c.slice(3, 5), 16);
+  const b = parseInt(c.slice(5, 7), 16);
+  let best = null, bestD = Infinity;
+  named.forEach(([nh, nn]) => {
+    const nr = parseInt(nh.slice(1, 3), 16);
+    const ng = parseInt(nh.slice(3, 5), 16);
+    const nb = parseInt(nh.slice(5, 7), 16);
+    const d = (nr-r)*(nr-r) + (ng-g)*(ng-g) + (nb-b)*(nb-b);
+    if (d < bestD) { bestD = d; best = nn; }
+  });
+  return best || c;
+}
+
+// --------------------------------------------------------------------------
+// User-offset helpers
 // --------------------------------------------------------------------------
 
 function getUserOffset(g) {
@@ -97,7 +193,6 @@ function setUserOffset(g, x, y) {
   const base = g.dataset.baseTransform;
   const tr = `translate(${x} ${y}) ${base}`.trim();
   g.setAttribute("transform", tr);
-  // Synchronise les inputs X/Y du panneau
   syncPositionInputs(g);
 }
 
@@ -106,12 +201,12 @@ function syncPositionInputs(g) {
   const xInp = document.querySelector(`[data-pos-x-for="${cssEscape(id)}"]`);
   const yInp = document.querySelector(`[data-pos-y-for="${cssEscape(id)}"]`);
   const off = getUserOffset(g);
-  if (xInp) xInp.value = off.x;
-  if (yInp) yInp.value = off.y;
+  if (xInp) xInp.value = Math.round(off.x);
+  if (yInp) yInp.value = Math.round(off.y);
 }
 
 // --------------------------------------------------------------------------
-// Chargement initial
+// Chargement
 // --------------------------------------------------------------------------
 
 async function loadTemplates() {
@@ -155,7 +250,7 @@ function populateCategories() {
 }
 
 // --------------------------------------------------------------------------
-// Rendu du SVG dans la scène
+// Rendu + décoration
 // --------------------------------------------------------------------------
 
 function renderSvg(svgString) {
@@ -169,33 +264,51 @@ function renderSvg(svgString) {
   decorateEditableElements(svg);
 }
 
+const EDITABLE_TAGS = new Set([
+  "g","path","rect","circle","ellipse","polygon","polyline","line","text"
+]);
+
 function decorateEditableElements(svg) {
-  svg.querySelectorAll("g").forEach(g => {
-    if (!nameOf(g)) return;
+  // On scanne TOUS les éléments avec un id ou un data-name, on filtre par
+  // tag éligible et on évite les enfants de <defs> (gradients, patterns).
+  svg.querySelectorAll("[id], [data-name]").forEach(el => {
+    if (el.closest("defs")) return;
+    const tag = el.tagName ? el.tagName.toLowerCase() : "";
+    if (!EDITABLE_TAGS.has(tag)) return;
+
+    const name = nameOf(el);
+    if (!name) return;
+
     let kind = null;
-    if (isColor(g)) kind = "color";
-    else if (isText(g)) kind = "text";
-    else if (isLogo(g)) kind = "logo";
+    if (isColor(el)) kind = "color";
+    else if (isLogo(el)) kind = "logo";
+    else if (isText(el)) kind = "text";
     if (!kind) return;
 
-    g.setAttribute("data-editable", kind);
-    g.setAttribute("data-kind", kind);
+    // Si un parent éditable du même genre existe déjà, on saute (évite la
+    // détection en double sur structures imbriquées).
+    const parentEditable = el.parentElement &&
+      el.parentElement.closest(`[data-kind="${kind}"]`);
+    if (parentEditable && parentEditable !== el) return;
 
-    g.addEventListener("click", (e) => {
-      e.stopPropagation();
-      selectElement(g);
-      // Active automatiquement l'onglet correspondant
-      switchTab(kind === "color" ? "colors" : kind === "text" ? "texts" : "logos");
-    });
+    el.setAttribute("data-editable", kind);
+    el.setAttribute("data-kind", kind);
 
     if (kind === "logo") {
-      g.setAttribute("data-drop-target", "true");
-      attachDropHandlers(g);
+      // Mémorise le contenu d'origine pour restauration
+      el._originalChildren = Array.from(el.childNodes).map(n => n.cloneNode(true));
+      el.setAttribute("data-drop-target", "true");
+      attachDropHandlers(el);
     }
     if (kind === "text") {
-      const t = g.querySelector("text");
-      if (t) makeGroupDraggable(g);
+      makeNodeDraggable(el);
     }
+
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      selectElement(el);
+      switchTab(kind === "color" ? "colors" : kind === "text" ? "texts" : "logos");
+    });
   });
 }
 
@@ -203,6 +316,7 @@ function selectElement(el) {
   $$(".stage [data-editable]").forEach(n => n.classList.remove("selected"));
   el.classList.add("selected");
   state.selectedEl = el;
+
   $$("[data-control-for]").forEach(n => n.style.background = "");
   const id = nameOf(el);
   const ctl = document.querySelector(`[data-control-for="${cssEscape(id)}"]`);
@@ -221,73 +335,90 @@ function buildControls() {
   buildLogoControls(svg);
 }
 
+// ---- Color : regroupé par (data-name, fill) ----
+
 function buildColorControls(svg) {
   const list = $("#colorList");
   list.innerHTML = "";
-  svg.querySelectorAll('g[data-kind="color"]').forEach(g => {
-    list.appendChild(buildColorControl(g, nameOf(g), prettyLabel(nameOf(g))));
-  });
-  if (!list.children.length) {
+  const els = Array.from(svg.querySelectorAll('[data-kind="color"]'));
+  if (!els.length) {
     list.innerHTML = `<p class="muted-note">Aucun calque "color_…" dans ce template.</p>`;
+    return;
   }
+  const groups = new Map();
+  els.forEach(el => {
+    const dn = nameOf(el).toLowerCase();
+    const fill = normalizeColor(getEffectiveFill(el));
+    // Si le calque a un nom unique (color_fond, color_jantes), une clé par
+    // nom. Sinon, on regroupe par couleur (cas du kit moto).
+    const hasUniqueSuffix = /^color[_\-].+/.test(dn);
+    const key = hasUniqueSuffix ? dn : `__byfill__|${fill}`;
+    if (!groups.has(key)) groups.set(key, { dataName: dn, fill, elements: [] });
+    groups.get(key).elements.push(el);
+  });
+
+  const arr = Array.from(groups.values()).sort((a, b) => b.elements.length - a.elements.length);
+  arr.forEach((grp, idx) => list.appendChild(buildColorGroupControl(grp, idx)));
 }
+
+function buildColorGroupControl(grp, idx) {
+  const wrap = document.createElement("div");
+  wrap.className = "field";
+  const hasUniqueSuffix = /^color[_\-].+/.test(grp.dataName);
+  const label = hasUniqueSuffix
+    ? prettyLabel(grp.dataName)
+    : `${colorBaseName(grp.fill)}  (${grp.elements.length} zone${grp.elements.length > 1 ? "s" : ""})`;
+  wrap.innerHTML = `
+    <label>${escapeHtml(label)}</label>
+    <div class="row">
+      <input type="color" value="${normalizeColor(grp.fill)}">
+      <input type="text" value="${escapeHtml(grp.fill)}" style="flex:1;">
+    </div>`;
+  const [picker, hex] = wrap.querySelectorAll("input");
+  const apply = (c) => {
+    grp.elements.forEach(el => applyFillToElement(el, c));
+    grp.fill = c;
+    hex.value = c;
+    picker.value = normalizeColor(c);
+  };
+  picker.addEventListener("input", (e) => apply(e.target.value));
+  hex.addEventListener("change", (e) => apply(e.target.value));
+  wrap.addEventListener("mouseenter", () => grp.elements.forEach(e => e.classList.add("hovered")));
+  wrap.addEventListener("mouseleave", () => grp.elements.forEach(e => e.classList.remove("hovered")));
+  wrap.addEventListener("click", () => grp.elements[0] && selectElement(grp.elements[0]));
+  return wrap;
+}
+
+// ---- Text controls (gère <g> ET <text> direct) ----
 
 function buildTextControls(svg) {
   const list = $("#textList");
   list.innerHTML = "";
-  svg.querySelectorAll('g[data-kind="text"]').forEach(g => {
-    list.appendChild(buildTextControl(g, nameOf(g), prettyLabel(nameOf(g))));
-  });
-  if (!list.children.length) {
-    list.innerHTML = `<p class="muted-note">Aucun calque "texte_…" ou "numero_…" dans ce template.</p>`;
+  const els = Array.from(svg.querySelectorAll('[data-kind="text"]'));
+  els.forEach(el => list.appendChild(buildTextControl(el)));
+  if (!els.length) {
+    list.innerHTML = `<p class="muted-note">Aucun calque "texte_…", "numero_…" ou "text".</p>`;
   }
 }
 
-function buildLogoControls(svg) {
-  const list = $("#logoZonesList");
-  list.innerHTML = "";
-  const zones = svg.querySelectorAll('g[data-kind="logo"]');
-  zones.forEach(g => list.appendChild(buildLogoZoneControl(g)));
-  if (!zones.length) {
-    list.innerHTML = `<p class="muted-note">Aucun emplacement "logo_…" dans ce template.
-      Utilisez « + Ajouter un logo libre » pour en créer un.</p>`;
-  }
+function getTextNode(el) {
+  if (el.tagName && el.tagName.toLowerCase() === "text") return el;
+  return el.querySelector("text");
 }
 
-// ---- Color control ----
-
-function buildColorControl(g, id, label) {
-  const current = getCurrentFill(g) || "#000000";
-  const wrap = document.createElement("div");
-  wrap.className = "field";
-  wrap.setAttribute("data-control-for", id);
-  wrap.innerHTML = `
-    <label>${escapeHtml(label)}</label>
-    <div class="row">
-      <input type="color" value="${normalizeColor(current)}">
-      <input type="text" value="${escapeHtml(current)}" style="flex:1;">
-    </div>`;
-  const [picker, hex] = wrap.querySelectorAll("input");
-  const apply = (c) => {
-    applyFillToGroup(g, c);
-    hex.value = c; picker.value = normalizeColor(c);
-  };
-  picker.addEventListener("input", (e) => apply(e.target.value));
-  hex.addEventListener("change", (e) => apply(e.target.value));
-  wrap.addEventListener("click", () => selectElement(g));
-  return wrap;
-}
-
-// ---- Text control (with font, size, weight, position) ----
-
-function buildTextControl(g, id, label) {
-  const textNode = g.querySelector("text");
+function buildTextControl(el) {
+  const id = nameOf(el);
+  const label = prettyLabel(id);
+  const textNode = getTextNode(el);
   const current = textNode ? textNode.textContent.trim() : "";
-  const fill = textNode ? (textNode.getAttribute("fill") || "#000000") : "#000000";
-  const size = textNode ? +(textNode.getAttribute("font-size") || 24) : 24;
-  const family = textNode ? (textNode.getAttribute("font-family") || "") : "";
-  const weight = textNode ? (textNode.getAttribute("font-weight") || "normal") : "normal";
-  const off = getUserOffset(g);
+  const fill = textNode ? (textNode.getAttribute("fill") || extractFillFromStyle(textNode) || "#000000") : "#000000";
+  const size = textNode ? +(textNode.getAttribute("font-size") ||
+                            (extractStyleProp(textNode, "font-size") || "24").replace("px","")) : 24;
+  const family = textNode ? (textNode.getAttribute("font-family") ||
+                            extractStyleProp(textNode, "font-family") || "") : "";
+  const weight = textNode ? (textNode.getAttribute("font-weight") ||
+                             extractStyleProp(textNode, "font-weight") || "normal") : "normal";
+  const off = getUserOffset(el);
 
   const wrap = document.createElement("div");
   wrap.className = "field text-block";
@@ -299,26 +430,25 @@ function buildTextControl(g, id, label) {
     <div class="row" style="margin-top:6px;">
       <select class="font-family" style="flex:1;">
         ${FONT_FAMILIES.map(f =>
-          `<option value="${escapeHtml(f.value)}" ${family === f.value ? "selected" : ""}>${escapeHtml(f.label)}</option>`
+          `<option value="${escapeHtml(f.value)}">${escapeHtml(f.label)}</option>`
         ).join("")}
       </select>
     </div>
 
     <div class="row" style="margin-top:6px;">
       <input type="color" class="text-color" value="${normalizeColor(fill)}" title="Couleur">
-      <input type="number" class="text-size" min="6" max="400" value="${size}" style="width:80px;" title="Taille">
-      <button type="button" class="ghost small text-bold ${weight === 'bold' || +weight >= 600 ? 'active' : ''}"
-              title="Gras">B</button>
+      <input type="number" class="text-size" min="6" max="800" value="${Math.round(size)}" style="width:80px;" title="Taille">
+      <button type="button" class="ghost small text-bold ${weight === 'bold' || +weight >= 600 ? 'active' : ''}" title="Gras">B</button>
     </div>
 
     <div class="row" style="margin-top:6px;">
       <label class="mini">X</label>
-      <input type="number" class="pos-x" value="${off.x}" data-pos-x-for="${escapeHtml(id)}" style="width:70px;">
+      <input type="number" class="pos-x" value="${Math.round(off.x)}" data-pos-x-for="${escapeHtml(id)}" style="width:70px;">
       <label class="mini">Y</label>
-      <input type="number" class="pos-y" value="${off.y}" data-pos-y-for="${escapeHtml(id)}" style="width:70px;">
+      <input type="number" class="pos-y" value="${Math.round(off.y)}" data-pos-y-for="${escapeHtml(id)}" style="width:70px;">
       <button type="button" class="ghost small reset-pos" title="Recentrer">↺</button>
     </div>
-    <p class="muted-note" style="margin:6px 0 0;">Astuce : on peut aussi déplacer le texte au clic-glissé sur le visuel.</p>
+    <p class="muted-note" style="margin:6px 0 0;">Astuce : glissez le texte directement sur le visuel pour le déplacer.</p>
   `;
 
   const textInput  = wrap.querySelector(".text-content");
@@ -332,51 +462,91 @@ function buildTextControl(g, id, label) {
 
   if (textNode) {
     textInput.addEventListener("input", () => textNode.textContent = textInput.value);
-    fontSelect.addEventListener("change", () => textNode.setAttribute("font-family", fontSelect.value));
-    colorInput.addEventListener("input", () => textNode.setAttribute("fill", colorInput.value));
-    sizeInput.addEventListener("input", () => textNode.setAttribute("font-size", sizeInput.value));
+    fontSelect.addEventListener("change", () => {
+      textNode.setAttribute("font-family", fontSelect.value);
+      removeStyleProp(textNode, "font-family");
+    });
+    colorInput.addEventListener("input", () => {
+      textNode.setAttribute("fill", colorInput.value);
+      updateInlineFill(textNode, colorInput.value);
+    });
+    sizeInput.addEventListener("input", () => {
+      textNode.setAttribute("font-size", sizeInput.value);
+      removeStyleProp(textNode, "font-size");
+    });
     boldBtn.addEventListener("click", () => {
       const isBold = boldBtn.classList.toggle("active");
       textNode.setAttribute("font-weight", isBold ? "bold" : "normal");
+      removeStyleProp(textNode, "font-weight");
     });
   }
-  posX.addEventListener("input", () => setUserOffset(g, +posX.value || 0, getUserOffset(g).y));
-  posY.addEventListener("input", () => setUserOffset(g, getUserOffset(g).x, +posY.value || 0));
-  resetPos.addEventListener("click", () => setUserOffset(g, 0, 0));
-
-  wrap.addEventListener("click", () => selectElement(g));
+  posX.addEventListener("input", () => setUserOffset(el, +posX.value || 0, getUserOffset(el).y));
+  posY.addEventListener("input", () => setUserOffset(el, getUserOffset(el).x, +posY.value || 0));
+  resetPos.addEventListener("click", () => setUserOffset(el, 0, 0));
+  wrap.addEventListener("click", () => selectElement(el));
   return wrap;
 }
 
-// ---- Logo zone control (one row per zone) ----
+function extractStyleProp(el, prop) {
+  const style = el.getAttribute("style") || "";
+  const re = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`, "i");
+  const m = style.match(re);
+  return m ? m[1].trim() : null;
+}
+
+function removeStyleProp(el, prop) {
+  const style = el.getAttribute("style") || "";
+  if (!style) return;
+  const re = new RegExp(`(^|;)\\s*${prop}\\s*:\\s*[^;]+;?`, "ig");
+  const ns = style.replace(re, "$1").replace(/;;+/g, ";").replace(/^;|;$/g, "").trim();
+  if (ns) el.setAttribute("style", ns); else el.removeAttribute("style");
+}
+
+// ---- Logo zones ----
+
+function buildLogoControls(svg) {
+  const list = $("#logoZonesList");
+  list.innerHTML = "";
+  const zones = svg.querySelectorAll('[data-kind="logo"]');
+  zones.forEach(g => list.appendChild(buildLogoZoneControl(g)));
+  if (!zones.length) {
+    list.innerHTML = `<p class="muted-note">Aucun emplacement "logo_…" dans ce template.
+      Utilisez « + Ajouter un logo libre » pour en créer un.</p>`;
+  }
+}
 
 function buildLogoZoneControl(g) {
   const id = nameOf(g);
-  const label = prettyLabel(id);
+  const label = prettyLabel(id) || id;
   const placed = g.querySelector("[data-logo-id]");
+  const isOriginal = !placed && g._originalChildren && g._originalChildren.length > 0;
 
   const wrap = document.createElement("div");
   wrap.className = "logo-zone-row";
   wrap.setAttribute("data-control-for", id);
 
-  const previewSvg = placed ? new XMLSerializer().serializeToString(placed) : "";
+  const previewInner = previewMiniSvg(g);
   wrap.innerHTML = `
-    <div class="zone-preview">${placed ? previewSvg :
-      `<span class="empty">vide</span>`}</div>
+    <div class="zone-preview">${previewInner}</div>
     <div class="zone-meta">
       <div class="zone-name">${escapeHtml(label)}</div>
-      <div class="zone-state">${placed ? "Logo posé" : "Emplacement vide"}</div>
+      <div class="zone-state">${
+        placed ? "Logo remplacé" : (isOriginal ? "Logo d'origine" : "Emplacement vide")
+      }</div>
     </div>
     <div class="zone-actions">
       <button class="ghost small zone-select" title="Sélectionner">◎</button>
-      ${placed ? `<button class="danger small zone-remove" title="Retirer le logo">✕</button>` : ""}
+      ${placed ? `<button class="ghost small zone-restore" title="Restaurer l'original">↺</button>` : ""}
+      ${(placed || isOriginal) ? `<button class="danger small zone-clear" title="Vider">✕</button>` : ""}
       ${id.startsWith("logo_user_") ? `<button class="danger small zone-delete" title="Supprimer cet emplacement">🗑</button>` : ""}
     </div>
   `;
 
   wrap.querySelector(".zone-select").addEventListener("click", () => selectElement(g));
-  const removeBtn = wrap.querySelector(".zone-remove");
-  if (removeBtn) removeBtn.addEventListener("click", () => { removePlacedLogo(g); rebuildLogoControls(); });
+  const restoreBtn = wrap.querySelector(".zone-restore");
+  if (restoreBtn) restoreBtn.addEventListener("click", () => { restoreOriginalLogo(g); rebuildLogoControls(); });
+  const clearBtn = wrap.querySelector(".zone-clear");
+  if (clearBtn) clearBtn.addEventListener("click", () => { clearLogoZone(g); rebuildLogoControls(); });
   const deleteBtn = wrap.querySelector(".zone-delete");
   if (deleteBtn) deleteBtn.addEventListener("click", () => {
     if (confirm("Supprimer cet emplacement libre ?")) { g.remove(); rebuildLogoControls(); }
@@ -385,42 +555,30 @@ function buildLogoZoneControl(g) {
   return wrap;
 }
 
+function previewMiniSvg(g) {
+  try {
+    const bbox = g.getBBox();
+    if (!bbox.width || !bbox.height) return `<span class="empty">vide</span>`;
+    const clone = g.cloneNode(true);
+    clone.removeAttribute("data-editable");
+    clone.removeAttribute("data-kind");
+    clone.removeAttribute("transform");
+    const ser = new XMLSerializer().serializeToString(clone);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}">
+              ${ser}
+            </svg>`;
+  } catch (e) {
+    return `<span class="empty">…</span>`;
+  }
+}
+
 function rebuildLogoControls() {
   const svg = $("#svgHost").querySelector("svg");
   if (svg) buildLogoControls(svg);
 }
 
 // --------------------------------------------------------------------------
-// Couleurs
-// --------------------------------------------------------------------------
-
-function getCurrentFill(g) {
-  const candidate = g.querySelector("[fill]") || g.querySelector("path,rect,circle,polygon,ellipse,polyline");
-  if (!candidate) return null;
-  return candidate.getAttribute("fill") || "#000000";
-}
-
-function applyFillToGroup(g, color) {
-  g.setAttribute("fill", color);
-  g.querySelectorAll("path,rect,circle,polygon,ellipse,polyline").forEach(node => {
-    node.setAttribute("fill", color);
-  });
-}
-
-function normalizeColor(c) {
-  if (!c) return "#000000";
-  if (/^#[0-9a-fA-F]{6}$/.test(c)) return c;
-  if (/^#[0-9a-fA-F]{3}$/.test(c)) {
-    return "#" + c.slice(1).split("").map(ch => ch + ch).join("");
-  }
-  const ctx = document.createElement("canvas").getContext("2d");
-  ctx.fillStyle = "#000";
-  ctx.fillStyle = c;
-  return ctx.fillStyle;
-}
-
-// --------------------------------------------------------------------------
-// Logos : bibliothèque
+// Bibliothèque de logos
 // --------------------------------------------------------------------------
 
 function renderLogosGrid() {
@@ -473,6 +631,7 @@ function attachDropHandlers(slot) {
 }
 
 function placeLogoInto(slot, logo) {
+  // On utilise la boîte ORIGINALE (sans transform user) si possible.
   const bbox = slot.getBBox();
   const parser = new DOMParser();
   const doc = parser.parseFromString(logo.svgContent, "image/svg+xml");
@@ -488,7 +647,6 @@ function placeLogoInto(slot, logo) {
   const ty = bbox.y + (bbox.height - srcH * scale) / 2;
 
   while (slot.firstChild) slot.removeChild(slot.firstChild);
-  // Le user-offset du slot doit être conservé : on ne touche pas à son transform.
   const inner_g = document.createElementNS("http://www.w3.org/2000/svg", "g");
   inner_g.setAttribute("transform", `translate(${tx} ${ty}) scale(${scale})`);
   inner_g.setAttribute("data-logo-id", logo.id);
@@ -501,27 +659,30 @@ function placeLogoInto(slot, logo) {
   showToast(`Logo « ${logo.name} » placé`);
 }
 
-function removePlacedLogo(slot) {
-  const placed = slot.querySelectorAll("[data-logo-id]");
-  placed.forEach(p => p.remove());
-  // Repose un placeholder visuel si le slot est maintenant vide
-  if (!slot.firstChild) {
-    const bbox = slot.dataset.placeholderBox ?
-      JSON.parse(slot.dataset.placeholderBox) :
-      { x: 0, y: 0, width: 80, height: 80 };
-    const ph = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    ph.setAttribute("x", bbox.x); ph.setAttribute("y", bbox.y);
-    ph.setAttribute("width", bbox.width || 80); ph.setAttribute("height", bbox.height || 80);
-    ph.setAttribute("fill", "#ffffff");
-    ph.setAttribute("stroke", "#999"); ph.setAttribute("stroke-dasharray", "4 4");
-    ph.setAttribute("data-placeholder", "true");
-    slot.appendChild(ph);
-  }
-  showToast("Logo retiré");
+function restoreOriginalLogo(slot) {
+  if (!slot._originalChildren) return;
+  while (slot.firstChild) slot.removeChild(slot.firstChild);
+  slot._originalChildren.forEach(n => slot.appendChild(n.cloneNode(true)));
+  showToast("Logo d'origine restauré");
+}
+
+function clearLogoZone(slot) {
+  while (slot.firstChild) slot.removeChild(slot.firstChild);
+  const bbox = slot.dataset.placeholderBox
+    ? JSON.parse(slot.dataset.placeholderBox)
+    : { x: 0, y: 0, width: 80, height: 80 };
+  const ph = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  ph.setAttribute("x", bbox.x); ph.setAttribute("y", bbox.y);
+  ph.setAttribute("width", bbox.width || 80); ph.setAttribute("height", bbox.height || 80);
+  ph.setAttribute("fill", "#ffffff");
+  ph.setAttribute("stroke", "#999");
+  ph.setAttribute("stroke-dasharray", "4 4");
+  ph.setAttribute("data-placeholder", "true");
+  slot.appendChild(ph);
 }
 
 // --------------------------------------------------------------------------
-// Logo libre (zone créée à la volée)
+// Logo libre
 // --------------------------------------------------------------------------
 
 function addFreeLogo() {
@@ -529,7 +690,8 @@ function addFreeLogo() {
   if (!svg) { showToast("Chargez d'abord un template"); return; }
   const vb = (svg.getAttribute("viewBox") || "0 0 600 600").split(/[\s,]+/).map(Number);
   const cx = (vb[2] || 600) / 2, cy = (vb[3] || 600) / 2;
-  const W = 100, H = 100;
+  const W = Math.max(60, (vb[2] || 600) * 0.08);
+  const H = W;
 
   const SVG_NS = "http://www.w3.org/2000/svg";
   const g = document.createElementNS(SVG_NS, "g");
@@ -547,17 +709,16 @@ function addFreeLogo() {
   ph.setAttribute("data-placeholder", "true");
   g.appendChild(ph);
 
-  // Mémoriser la boîte initiale pour les futurs « retirer logo »
   g.dataset.placeholderBox = JSON.stringify({ x: cx - W/2, y: cy - H/2, width: W, height: H });
 
   svg.appendChild(g);
-  // Décoration (data-kind=logo + handlers + drag)
   g.setAttribute("data-editable", "logo");
   g.setAttribute("data-kind", "logo");
   g.setAttribute("data-drop-target", "true");
   attachDropHandlers(g);
   g.addEventListener("click", (e) => { e.stopPropagation(); selectElement(g); });
-  makeGroupDraggable(g);
+  makeNodeDraggable(g);
+  g._originalChildren = []; // pas d'original
 
   selectElement(g);
   switchTab("logos");
@@ -566,11 +727,10 @@ function addFreeLogo() {
 }
 
 // --------------------------------------------------------------------------
-// Drag intra-SVG
+// Drag
 // --------------------------------------------------------------------------
 
-/** Rend le groupe entier déplaçable (utilise setUserOffset, préserve le transform AI). */
-function makeGroupDraggable(g) {
+function makeNodeDraggable(node) {
   let dragging = false, startX = 0, startY = 0, baseX = 0, baseY = 0;
   const svg = () => $("#svgHost").querySelector("svg");
 
@@ -580,27 +740,25 @@ function makeGroupDraggable(g) {
     return p.matrixTransform(s.getScreenCTM().inverse());
   }
 
-  g.addEventListener("mousedown", (e) => {
-    // Ne pas démarrer un drag depuis un sous-élément déjà draggable (logo placé)
-    if (e.target.closest("[data-logo-id]")) return;
+  node.addEventListener("mousedown", (e) => {
+    if (e.target.closest("[data-logo-id]") && e.target !== node) return;
     e.stopPropagation();
     dragging = true;
     const p = pt(e); startX = p.x; startY = p.y;
-    const off = getUserOffset(g);
+    const off = getUserOffset(node);
     baseX = off.x; baseY = off.y;
-    g.style.opacity = .85;
+    node.style.opacity = .85;
   });
   document.addEventListener("mousemove", (e) => {
     if (!dragging) return;
     const p = pt(e);
-    setUserOffset(g, baseX + (p.x - startX), baseY + (p.y - startY));
+    setUserOffset(node, baseX + (p.x - startX), baseY + (p.y - startY));
   });
   document.addEventListener("mouseup", () => {
-    if (dragging) { dragging = false; g.style.opacity = 1; }
+    if (dragging) { dragging = false; node.style.opacity = 1; }
   });
 }
 
-/** Déplace un sous-élément (ex. le logo posé à l'intérieur d'un slot). */
 function makeDraggable(slot, movable) {
   let dragging = false, startX = 0, startY = 0, baseX = 0, baseY = 0;
   movable.style.cursor = "move";
@@ -624,7 +782,6 @@ function makeDraggable(slot, movable) {
       node.setAttribute("transform", `translate(${x} ${y}) ${cur}`.trim());
     }
   }
-
   movable.addEventListener("mousedown", (e) => {
     e.stopPropagation();
     dragging = true;
@@ -643,7 +800,7 @@ function makeDraggable(slot, movable) {
 }
 
 // --------------------------------------------------------------------------
-// Tabs
+// Tabs / keyboard / export
 // --------------------------------------------------------------------------
 
 function switchTab(name) {
@@ -651,23 +808,14 @@ function switchTab(name) {
   $$(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.tabPanel === name));
 }
 
-// --------------------------------------------------------------------------
-// Keyboard
-// --------------------------------------------------------------------------
-
 document.addEventListener("keydown", (e) => {
   if ((e.key === "Delete" || e.key === "Backspace") && state.selectedEl &&
       state.selectedEl.getAttribute("data-kind") === "logo") {
-    // Ne pas intercepter quand l'utilisateur tape dans un input
     if (["INPUT","TEXTAREA","SELECT"].includes(document.activeElement?.tagName)) return;
-    removePlacedLogo(state.selectedEl);
+    clearLogoZone(state.selectedEl);
     rebuildLogoControls();
   }
 });
-
-// --------------------------------------------------------------------------
-// Export / panier
-// --------------------------------------------------------------------------
 
 function currentSvgString() {
   const svg = $("#svgHost").querySelector("svg");
@@ -678,6 +826,7 @@ function currentSvgString() {
     n.removeAttribute("data-kind");
     n.removeAttribute("data-drop-target");
     n.classList.remove("selected");
+    n.classList.remove("hovered");
   });
   clone.querySelectorAll("[data-placeholder]").forEach(n => n.remove());
   return new XMLSerializer().serializeToString(clone);
@@ -700,7 +849,7 @@ async function exportPng() {
   const url = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgStr)));
   img.onload = () => {
     const canvas = document.createElement("canvas");
-    canvas.width = w * 2; canvas.height = h * 2;
+    canvas.width = Math.min(4000, w * 2); canvas.height = Math.min(4000, h * 2);
     const ctx = canvas.getContext("2d");
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     canvas.toBlob((blob) => {
@@ -744,8 +893,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#addFreeLogoBtn").addEventListener("click", addFreeLogo);
   $("#logoSearch").addEventListener("input", renderLogosGrid);
   $("#categoryFilter").addEventListener("change", renderLogosGrid);
-
-  // Onglets
   $$("#leftTabs .tab").forEach(t => t.addEventListener("click", () => switchTab(t.dataset.tab)));
 
   $("#stage").addEventListener("click", (e) => {

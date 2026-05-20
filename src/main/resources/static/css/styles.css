@@ -83,6 +83,7 @@ header.top nav a:hover { color: var(--primary); }
 /* Highlight editable elements */
 .stage [data-editable]:hover { outline: 2px dashed var(--primary); cursor: pointer; }
 .stage [data-editable].selected { outline: 2px solid var(--primary); }
+.stage [data-editable].hovered { outline: 2px dashed var(--ok); }
 .stage [data-drop-target].drag-over { outline: 3px dashed var(--ok); }
 
 /* Field rows */
